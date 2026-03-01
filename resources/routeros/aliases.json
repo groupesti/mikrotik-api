@@ -1,0 +1,27 @@
+{
+  "ip/firewall/filter": [
+    "Rules",
+    "Filters"
+  ],
+  "ip/firewall/nat": [
+    "NatRules"
+  ],
+  "ip/address": [
+    "Addresses"
+  ],
+  "interface": [
+    "Interfaces"
+  ],
+  "routing/bgp/connection": [
+    "BgpConnections"
+  ],
+  "system/script": [
+    "Scripts"
+  ],
+  "user": [
+    "Users"
+  ],
+  "queue/simple": [
+    "SimpleQueues"
+  ]
+}

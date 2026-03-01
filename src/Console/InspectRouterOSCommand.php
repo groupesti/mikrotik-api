@@ -1,0 +1,277 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MikroTik\Console;
+
+use Illuminate\Console\Command;
+use MikroTik\RouterOS;
+
+final class InspectRouterOSCommand extends Command
+{
+    protected $signature = 'mikrotik:inspect
+        {--host= : RouterOS host}
+        {--username= : Username}
+        {--password= : Password}
+        {--port=443 : REST port}
+        {--tls=1 : 1 for https, 0 for http}
+        {--verify-tls=0 : 1 to verify TLS}
+        {--out=resources/routeros/schema-local.json : Output schema path}
+        {--stubs=stubs/routeros.full.stub.php : Output IDE stubs path}
+        {--depth=12 : Max depth to generate stubs}';
+
+    protected $description = 'Inspect RouterOS via REST /console/inspect and generate schema + FULL IDE stubs (all menus).';
+
+    public function handle(): int
+    {
+        $host = (string)($this->option('host') ?? '');
+        $user = (string)($this->option('username') ?? '');
+        $pass = (string)($this->option('password') ?? '');
+        $port = (int)($this->option('port') ?? 443);
+        $tls = ((string)($this->option('tls') ?? '1')) === '1';
+        $verifyTls = ((string)($this->option('verify-tls') ?? '0')) === '1';
+        $depth = (int)($this->option('depth') ?? 12);
+
+        if ($host === '' || $user === '' || $pass === '') {
+            $this->error('Options requises: --host --username --password');
+            return self::FAILURE;
+        }
+
+        $router = RouterOS::New()
+            ->Host($host)
+            ->Username($user)
+            ->Password($pass)
+            ->Port($port)
+            ->Transport('rest')
+            ->Tls($tls)
+            ->VerifyTls($verifyTls)
+            ->Connect();
+
+        $res = $router->Console()->Inspect()->Get();
+        if (!$res->ok()) {
+            $this->error('Inspect failed HTTP ' . $res->status);
+            return self::FAILURE;
+        }
+
+        $outPath = (string)$this->option('out');
+        $stubsPath = (string)$this->option('stubs');
+
+        $schema = [
+            'routeros' => 'local',
+            'generated_at' => date('c'),
+            'inspect' => $res->data,
+        ];
+
+        $fullOut = base_path($outPath);
+        @mkdir(dirname($fullOut), 0775, true);
+        file_put_contents($fullOut, json_encode($schema, JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES));
+        $this->info('Schema écrit: ' . $outPath);
+
+        $tree = $this->buildTree($res->data, $depth);
+        $aliases = $this->loadAliases();
+        $stub = $this->buildFullStubs($tree, $aliases);
+
+        $fullStubs = base_path($stubsPath);
+        @mkdir(dirname($fullStubs), 0775, true);
+        file_put_contents($fullStubs, $stub);
+
+        $this->info('Stubs FULL écrits: ' . $stubsPath);
+        $this->line('Astuce: ajoutez ce fichier aux "stubFiles" de votre IDE / Intelephense.');
+        return self::SUCCESS;
+    }
+
+    /**
+     * Build a tree: path => children[]
+     * @param mixed $inspect
+     * @return array<string,list<string>>
+     */
+    private function buildTree(mixed $inspect, int $maxDepth): array
+    {
+        $tree = [];
+
+        $walk = function($node, string $path, int $depth) use (&$walk, &$tree, $maxDepth): void {
+            if ($depth > $maxDepth) return;
+            if (!is_array($node)) return;
+
+            $children = null;
+            if (isset($node['children']) && is_array($node['children'])) {
+                $children = $node['children'];
+            } elseif (array_is_list($node)) {
+                $children = $node;
+            }
+
+            if ($children === null) return;
+
+            foreach ($children as $ch) {
+                if (!is_array($ch) || !isset($ch['name']) || !is_string($ch['name'])) {
+                    continue;
+                }
+                $name = trim($ch['name']);
+                if ($name === '') continue;
+
+                $tree[$path] = $tree[$path] ?? [];
+                if (!in_array($name, $tree[$path], true)) {
+                    $tree[$path][] = $name;
+                }
+
+                $childPath = $path === '' ? $name : $path . '/' . $name;
+                $walk($ch, $childPath, $depth + 1);
+            }
+        };
+
+        $walk($inspect, '', 0);
+
+        foreach ($tree as $p => $kids) {
+            $kids = array_values(array_unique($kids));
+            sort($kids);
+            $tree[$p] = $kids;
+        }
+
+        return $tree;
+    }
+
+    /** @param array<string,list<string>> $tree */
+    private function buildFullStubs(array $tree, array $aliases = []): string
+    {
+        $rootKids = $tree[''] ?? [];
+
+        // Sort paths by depth to ensure parents before children in generated output
+        $paths = array_keys($tree);
+        usort($paths, function(string $a, string $b): int {
+            $da = substr_count($a, '/');
+            $db = substr_count($b, '/');
+            if ($da === $db) return strcmp($a, $b);
+            return $da <=> $db;
+        });
+
+        $code = "<?php\n\n";
+        $code .= "// Generated by mikrotik:inspect (FULL stubs)\n";
+        $code .= "// This file is for IDE autocomplete only.\n\n";
+
+        // RouterOSRuntime stubs
+        $code .= "namespace MikroTik\\Client\\Runtime;\n\n";
+        $code .= "/**\n * IDE helper stub (FULL, generated).\n";
+        foreach ($rootKids as $kid) {
+            $meth = $this->phpMethodName($kid);
+            $class = '\\MikroTik\\IDE\\N\\' . $this->classNameForPath($kid);
+            $code .= " * @method {$class} {$meth}()\n";
+        }
+        $code .= " * @method \\MikroTik\\Client\\Runtime\\RouterOSRuntime Api()\n";
+        $code .= " * @method \\MikroTik\\Client\\Runtime\\RouterOSRuntime Rest()\n";
+        $code .= " * @method \\MikroTik\\Fluent\\Node Path(string \$path)\n";
+        $code .= " */\nclass RouterOSRuntime {}\n\n";
+
+        // Fluent Node actions stub
+        $code .= "namespace MikroTik\\Fluent;\n\n";
+        $code .= "/**\n * Actions communes (stubs).\n";
+        $code .= " * @method \\MikroTik\\DTO\\Results\\MikroTikResult Get()\n";
+        $code .= " * @method \\MikroTik\\DTO\\Results\\MikroTikResult Add()\n";
+        $code .= " * @method \\MikroTik\\DTO\\Results\\MikroTikResult Set(string \$id)\n";
+        $code .= " * @method \\MikroTik\\DTO\\Results\\MikroTikResult Remove(string \$id)\n";
+        $code .= " * @method \\MikroTik\\DTO\\Results\\MikroTikResult Command(string \$command, array \$payload = [])\n";
+        $code .= " * @method \\MikroTik\\Fluent\\PrintNode Print()\n";
+        $code .= " * @method self With(array \$payload)\n";
+        $code .= " */\nclass Node {}\n\n";
+
+        // Contextual node classes
+        $code .= "namespace MikroTik\\IDE\\N;\n\n";
+        $code .= "use MikroTik\\Fluent\\Node;\n\n";
+
+        foreach ($paths as $path) {
+            if ($path === '') continue; // root is handled by RouterOSRuntime methods
+
+            $className = $this->classNameForPath($path);
+            $kids = $tree[$path] ?? [];
+
+            $code .= "/**\n * Path: /{$path}\n";
+            foreach ($kids as $kid) {
+                $childPath = $path === '' ? $kid : $path . '/' . $kid;
+                $aliasList = $aliases[$childPath] ?? [];
+                $aliasList = array_values(array_unique(array_merge($aliasList, $this->autoAliasesForChild($kid))));
+                $meth = $this->phpMethodName($kid);
+                $childPath = $path . '/' . $kid;
+                $childClass = '\\MikroTik\\IDE\\N\\' . $this->classNameForPath($childPath);
+                $code .= " * @method {$childClass} {$meth}()\n";
+                foreach ($aliasList as $aliasName) {
+                    $code .= " * @method {$childClass} {$aliasName}()\n";
+                }
+            }
+            // Also allow raw child by string (for unknown)
+            $code .= " * @method Node Child(string \$segment)\n";
+            $code .= " */\n";
+            $code .= "class {$className} extends Node {}\n\n";
+        }
+
+        return $code;
+    }
+
+    
+    private function loadAliases(): array
+    {
+        $file = file_exists(base_path('resources/routeros/aliases.json'))
+            ? base_path('resources/routeros/aliases.json')
+            : base_path('vendor/groupesti/mikrotik-api/resources/routeros/aliases.json');
+        if (!file_exists($file)) return [];
+        $json = json_decode((string)file_get_contents($file), true);
+        return is_array($json) ? $json : [];
+    }
+
+    
+    /** @param string $childName @return list<string> */
+    private function autoAliasesForChild(string $childName): array
+    {
+        $base = $this->phpMethodName($childName);
+
+        // crude pluralization rules for IDE ergonomics
+        $plural = $base;
+        if (str_ends_with(strtolower($base), 's')) {
+            $plural = $base; // already plural-ish
+        } elseif (str_ends_with(strtolower($base), 'y')) {
+            $plural = substr($base, 0, -1) . 'ies';
+        } else {
+            $plural = $base . 's';
+        }
+
+        $out = [$base, $plural];
+
+        // Special cases
+        $lc = strtolower($childName);
+        if ($lc === 'filter') { $out[] = 'Rules'; }
+        if ($lc === 'user') { $out[] = 'Users'; }
+        if ($lc === 'interface') { $out[] = 'Interfaces'; }
+        if ($lc === 'address') { $out[] = 'Addresses'; }
+        if ($lc === 'nat') { $out[] = 'NatRules'; }
+        if ($lc === 'mangle') { $out[] = 'MangleRules'; }
+        if ($lc === 'raw') { $out[] = 'RawRules'; }
+        if ($lc === 'script') { $out[] = 'Scripts'; }
+
+        // Unique
+        $out = array_values(array_unique($out));
+        return $out;
+    }
+
+    private function phpMethodName(string $menu): string
+    {
+        $menu = trim($menu);
+        $parts = preg_split('/[-_\s]+/', $menu) ?: [$menu];
+        $out = '';
+        foreach ($parts as $p) {
+            if ($p === '') continue;
+            $out .= ucfirst($p);
+        }
+        // keep IP pretty
+        if (strcasecmp($out, 'Ip') === 0) return 'IP';
+        return $out;
+    }
+
+    private function classNameForPath(string $path): string
+    {
+        $parts = preg_split('/\//', trim($path,'/')) ?: [];
+        $out = '';
+        foreach ($parts as $p) {
+            $p = preg_replace('/[^a-zA-Z0-9\-]/', '', $p) ?? $p;
+            $out .= $this->phpMethodName($p);
+        }
+        return $out === '' ? 'Root' : $out;
+    }
+}

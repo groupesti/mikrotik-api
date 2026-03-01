@@ -1,0 +1,30 @@
+{
+  "routeros": "7.21.3",
+  "roots": [
+    "certificate",
+    "console",
+    "disk",
+    "file",
+    "interface",
+    "ip",
+    "ipv6",
+    "log",
+    "mpls",
+    "partitions",
+    "port",
+    "ppp",
+    "queue",
+    "routing",
+    "snmp",
+    "special-login",
+    "system",
+    "task",
+    "tool",
+    "user",
+    "user-manager"
+  ],
+  "aliases": {
+    "ip/firewall/rules": "ip/firewall/filter",
+    "ip/firewall/filter": "ip/firewall/filter"
+  }
+}
