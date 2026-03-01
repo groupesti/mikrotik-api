@@ -3,19 +3,8 @@
   "description": "MikroTik RouterOS 7.* (incl. 7.21.3) REST + API socket client with fluent tree, schema inspector, IDE stubs, and ergonomic aliases for Laravel 12 (PHP 8.4).",
   "type": "library",
   "license": "MIT",
-  "authors": [
-   {
-	 "name": "Richard Simard",
-	 "email": "richard.simard@groupesti.com",
-	 "homepage": "https://groupesti.com"
-   }
-  ],
-  "homepage": "https://mikroadmin.groupesti.com",
   "require": {
     "php": "^8.4",
-    "ext-sockets": "*",
-    "ext-openssl": "*",
-     "ext-json": "*",
     "illuminate/support": "^12.0",
     "illuminate/contracts": "^12.0",
     "psr/log": "^3.0"
@@ -39,10 +28,6 @@
     "orchestra/testbench": "^10.0",
     "phpunit/phpunit": "^11.0",
     "phpstan/phpstan": "^2.0"
-  },
-  "suggest": {
-	"ext-gmp": "Required for WinBox EC-SRP5 authentication (Phase 3)",
-	"laravel/framework": "Required for Laravel integration (ServiceProvider, Facade)"
   },
   "minimum-stability": "stable",
   "prefer-stable": true,

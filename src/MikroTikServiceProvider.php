@@ -25,6 +25,7 @@ final class MikroTikServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 \MikroTik\Console\InspectRouterOSCommand::class,
+                \\MikroTik\\Console\\MakeUiScaffoldCommand::class,
             ]);
         }
 

@@ -61,3 +61,7 @@ Voir `docs/ENUMS.md`.
 
 ## Packagist
 Voir `docs/PACKAGIST.md`.
+
+
+## UI stubs (Tailwind 4 / Bootstrap 5.3.8) + Inertia/Vue3
+Voir `docs/UI_STUBS.md`.
